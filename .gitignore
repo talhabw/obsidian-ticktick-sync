@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build output
+main.js
+*.map
+
+# Environment/local secrets
+.env
+.env.*
+
+# Logs
+*.log
+
+# Editor/OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
