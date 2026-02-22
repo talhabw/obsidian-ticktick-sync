@@ -25,6 +25,7 @@ interface TickTickSimpleSyncSettings {
   tokenType: string;
   tokenExpiresAt: number;
   taskNotesFolder: string;
+  customTag: string;
   syncIntervalMinutes: number;
 }
 
@@ -39,6 +40,7 @@ const DEFAULT_SETTINGS: TickTickSimpleSyncSettings = {
   tokenType: "Bearer",
   tokenExpiresAt: 0,
   taskNotesFolder: "/",
+  customTag: "",
   syncIntervalMinutes: DEFAULT_SYNC_INTERVAL_MINUTES,
 };
 
@@ -387,6 +389,7 @@ export default class TickTickSimpleSyncPlugin extends Plugin {
 
     const folderPath = normalizeFolderPath(this.settings.taskNotesFolder);
     await this.ensureFolderExists(folderPath);
+    const customTag = normalizeCustomTag(this.settings.customTag);
 
     const existingBaseNames = new Set(
       this.app.vault
@@ -403,16 +406,32 @@ export default class TickTickSimpleSyncPlugin extends Plugin {
         continue;
       }
 
-      const date = toDateString(task.startDate);
-      const projectName = projectNameById.get(task.projectId ?? "") ?? "ticktick";
-      const projectTag = toTag(projectName);
-
       const notePath = normalizePath(
         folderPath ? `${folderPath}/${noteName}.md` : `${noteName}.md`,
       );
-      const noteBody = buildTaskNoteBody(task.content ?? "", date, projectTag);
 
-      await this.app.vault.create(notePath, noteBody);
+      if (this.app.vault.getAbstractFileByPath(notePath)) {
+        existingBaseNames.add(normalizedName);
+        continue;
+      }
+
+      const date = toDateString(task.startDate);
+      const projectName = projectNameById.get(task.projectId ?? "") ?? "ticktick";
+      const projectTag = toTag(projectName);
+      const noteTags = buildTagList(projectTag, customTag);
+      const noteBody = buildTaskNoteBody(task.content ?? "", date, noteTags);
+
+      try {
+        await this.app.vault.create(notePath, noteBody);
+      } catch (error) {
+        if (isAlreadyExistsError(error)) {
+          existingBaseNames.add(normalizedName);
+          continue;
+        }
+
+        throw error;
+      }
+
       existingBaseNames.add(normalizedName);
 
       await this.appendLinkToDailyNote(date, noteName);
@@ -660,6 +679,19 @@ class TickTickSimpleSyncSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
+      .setName("Custom tag")
+      .setDesc("Optional tag added to every imported task note")
+      .addText((text) => {
+        text
+          .setPlaceholder("Enter custom tag")
+          .setValue(this.plugin.settings.customTag)
+          .onChange(async (value) => {
+            this.plugin.settings.customTag = value.trim();
+            await this.plugin.saveSettings();
+          });
+      });
+
+    new Setting(containerEl)
       .setName("Sync interval (minutes)")
       .setDesc("Set 0 to disable periodic sync")
       .addText((text) => {
@@ -727,6 +759,10 @@ function parseSettings(loaded: unknown): Partial<TickTickSimpleSyncSettings> {
 
   if (typeof loaded.taskNotesFolder === "string") {
     parsed.taskNotesFolder = loaded.taskNotesFolder;
+  }
+
+  if (typeof loaded.customTag === "string") {
+    parsed.customTag = loaded.customTag;
   }
 
   if (typeof loaded.syncIntervalMinutes === "number" && Number.isFinite(loaded.syncIntervalMinutes)) {
@@ -808,6 +844,14 @@ function isUnauthorizedError(error: unknown): boolean {
   return error instanceof HttpError && error.status === 401;
 }
 
+function isAlreadyExistsError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return error.message.toLowerCase().includes("already exists");
+}
+
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object";
 }
@@ -879,9 +923,27 @@ function toTag(projectName: string): string {
   return cleaned.length > 0 ? cleaned : "ticktick";
 }
 
-function buildTaskNoteBody(content: string, date: string, projectTag: string): string {
+function normalizeCustomTag(rawTag: string): string {
+  const stripped = rawTag.trim().replace(/^#+/, "");
+  if (!stripped) {
+    return "";
+  }
+
+  return toTag(stripped);
+}
+
+function buildTagList(projectTag: string, customTag: string): string[] {
+  if (!customTag || customTag === projectTag) {
+    return [projectTag];
+  }
+
+  return [projectTag, customTag];
+}
+
+function buildTaskNoteBody(content: string, date: string, tags: string[]): string {
   const normalizedContent = content.replace(/\r\n/g, "\n");
-  const lines = ["---", `date: ${date}`, "tags:", `  - ${projectTag}`, "---", ""];
+  const tagLines = tags.map((tag) => `  - ${tag}`);
+  const lines = ["---", `date: ${date}`, "tags:", ...tagLines, "---", ""];
 
   if (normalizedContent.length > 0) {
     lines.push(normalizedContent);

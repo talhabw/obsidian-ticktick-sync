@@ -14,6 +14,7 @@ Minimal one-way sync from TickTick to Obsidian.
 - Creates the task note with:
   - frontmatter `date` from `task.startDate`
   - frontmatter `tags` including the TickTick project name
+  - optional custom tag from plugin settings
   - body from `task.content`
 
 ## Sync behavior
@@ -38,6 +39,7 @@ Minimal one-way sync from TickTick to Obsidian.
 - `Task notes folder` - where imported task notes are created.
   - default: `/` (vault root)
   - example: `/tasks/`
+- `Custom tag` - optional tag added to all imported task notes.
 - `Sync interval (minutes)`
   - `0` disables periodic sync
 
